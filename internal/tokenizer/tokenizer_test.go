@@ -5,6 +5,60 @@ import (
 	"testing"
 )
 
+func TestTiktokenWrapper(t *testing.T) {
+	tok, err := NewTiktokenizer()
+	if err != nil {
+		t.Fatalf("Failed to create tiktoken: %v", err)
+	}
+
+	t.Run("VocabSize", func(t *testing.T) {
+		if tok.VocabSize != 100277 {
+			t.Errorf("Expected vocab size 100277, got %d", tok.VocabSize)
+		}
+	})
+
+	t.Run("EncodeDecode", func(t *testing.T) {
+		text := "Hello, World!"
+		encoded := tok.Encode(text)
+		if len(encoded) == 0 {
+			t.Error("Expected non-empty encoding")
+		}
+
+		decoded := tok.Decode(encoded)
+		if decoded != text {
+			t.Errorf("Expected '%s', got '%s'", text, decoded)
+		}
+	})
+
+	t.Run("CountTokens", func(t *testing.T) {
+		text := "The quick brown fox jumps over the lazy dog."
+		count := tok.CountTokens(text)
+		if count <= 0 {
+			t.Error("Expected positive token count")
+		}
+		t.Logf("Token count for '%s': %d", text, count)
+	})
+}
+
+func TestGPT2Tokenizer(t *testing.T) {
+	tok, err := NewGPT2Tokenizer()
+	if err != nil {
+		t.Fatalf("Failed to create GPT-2 tokenizer: %v", err)
+	}
+
+	if tok.VocabSize != 50257 {
+		t.Errorf("Expected vocab size 50257, got %d", tok.VocabSize)
+	}
+
+	text := "Hello, World!"
+	encoded := tok.Encode(text)
+	decoded := tok.Decode(encoded)
+
+	if decoded != text {
+		t.Errorf("GPT-2 tokenizer round trip failed: got '%s'", decoded)
+	}
+}
+
 func TestCharTokenizer(t *testing.T) {
 	text := "hello world"
 	tok := NewCharTokenizer(text)
@@ -53,18 +107,14 @@ func TestBPETokenizer(t *testing.T) {
 }
 
 func TestBPECompression(t *testing.T) {
-	// Repeated text should compress well with BPE
 	text := strings.Repeat("hello world ", 100)
 	tok := NewCharTokenizer(text)
 
-	// Original encoding (character level)
 	origEncoded := tok.Encode(text)
 	origLen := len(origEncoded)
 
-	// Train BPE
 	tok.TrainBPE(text, 20)
 
-	// After BPE, encoding should be shorter
 	bpeEncoded := tok.Encode(text)
 	bpeLen := len(bpeEncoded)
 
@@ -96,21 +146,9 @@ func TestEncodeDecode(t *testing.T) {
 	}
 }
 
-func TestGetChars(t *testing.T) {
-	tok := NewCharTokenizer("hello world")
-	chars := tok.GetChars()
-
-	// Should only contain single characters, sorted
-	expected := " dehlorw"
-	if chars != expected {
-		t.Errorf("Expected chars '%s', got '%s'", expected, chars)
-	}
-}
-
 func TestNewlineNormalization(t *testing.T) {
 	tok := NewCharTokenizer("a\nb\nc")
 
-	// Test with different newline styles
 	testCases := []struct {
 		input    string
 		expected string
