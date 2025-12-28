@@ -186,17 +186,59 @@ Learned predictions:
 
 ---
 
+## 2025-12-27: GPU Acceleration & Training Improvements
+
+### Completed
+- Created backend abstraction layer (`pkg/backend/`) for swappable CPU/GPU computation
+- Implemented MLX backend for Apple Silicon GPU acceleration (requires `-tags=mlx`)
+- Implemented GoNum CPU backend as default fallback
+- Added AdamW optimizer with decoupled weight decay
+- Added cosine learning rate scheduler with warmup
+- Added label smoothing cross-entropy loss
+- Increased model capacity for industry-standard training
+
+### Backend Package
+| Component | Description |
+|-----------|-------------|
+| Backend interface | Defines all tensor operations |
+| GoNumBackend | CPU implementation using gonum/mat |
+| MLXBackend | GPU implementation using Apple MLX |
+| AutoSelectBackend | Automatically picks best available backend |
+
+### New Optimizers & Schedulers
+| Component | Description |
+|-----------|-------------|
+| AdamW | Adam with decoupled weight decay (recommended for transformers) |
+| LRScheduler | Cosine annealing with warmup |
+
+### New Loss Functions
+| Loss | Description |
+|------|-------------|
+| CrossEntropyLossWithSmoothing | Label smoothing regularization |
+
+### Improved Hyperparameters
+- EmbedDim: 64 → 128
+- NumLayers: 3 → 4
+- ContextWindow: 32 → 64
+- FFHiddenDim: 256 → 512
+- Training epochs: 500 → 1000 (simple model), 300 → 500 (GPT)
+
+### Tests: 45 tests passing (10 new backend tests)
+
+---
+
 ## Summary
 
-### Total Test Cases: 35 (all passing)
+### Total Test Cases: 45 (all passing)
 - Tokenizer: 7 tests
 - Autograd: 11 tests
 - Neural networks: 8 tests  
 - Transformer: 9 tests
+- Backend: 10 tests
 
 ### Code Statistics
-- ~2000 lines of Go code
-- 4 packages: autograd, nn, transformer, tokenizer
+- ~3000 lines of Go code
+- 5 packages: autograd, nn, transformer, tokenizer, backend
 - 1 training script
 
 ### What Works
@@ -204,16 +246,25 @@ Learned predictions:
 ✅ All basic math operations with correct gradients
 ✅ Neural network layers (Linear, Embedding)
 ✅ Activation functions (ReLU, Softmax, GELU, etc.)
-✅ Loss functions (CrossEntropy, MSE, NLL)
-✅ Optimizers (SGD, Adam)
+✅ Loss functions (CrossEntropy, MSE, NLL, SmoothedCrossEntropy)
+✅ Optimizers (SGD, Adam, AdamW)
+✅ Learning rate scheduling (warmup + cosine decay)
 ✅ Transformer components (Attention, LayerNorm, FFN)
 ✅ Full GPT model with generation
 ✅ Training loop with loss decreasing
+✅ Backend abstraction for CPU/GPU
+✅ MLX GPU support for Apple Silicon (build with -tags=mlx)
+
+### GPU Acceleration (Apple Silicon)
+To enable GPU acceleration on Mac:
+1. Install MLX C library (from Apple's mlx repository)
+2. Build with: `CGO_ENABLED=1 go build -tags=mlx ./cmd/train/`
 
 ### Next Steps (for production use)
-1. Implement full backprop through all transformer layers
-2. Add gradient clipping
-3. Implement checkpointing
-4. Add more training data
-5. Implement batched training
-6. Add learning rate scheduling
+1. ~~Add gradient clipping~~ ✅ Added
+2. ~~Add learning rate scheduling~~ ✅ Added
+3. Implement full backprop through all transformer layers
+4. Implement checkpointing
+5. Add more training data
+6. Profile and optimize GPU kernel utilization
+

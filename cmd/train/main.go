@@ -33,12 +33,7 @@ func main() {
 	}
 	text := string(textBytes)
 
-	// Limit text size for faster training
-	maxChars := 20000
-	if len(text) > maxChars {
-		text = text[:maxChars]
-	}
-
+	// Use full training text (no character cap for industry-standard training)
 	fmt.Printf("Training text: %d characters\n", len(text))
 	fmt.Printf("First 200 chars: %s...\n\n", text[:min(200, len(text))])
 
@@ -47,8 +42,8 @@ func main() {
 	tok := tokenizer.NewCharTokenizer(text)
 	charVocabSize := tok.VocabSize
 
-	// Train BPE merges
-	numMerges := 100 // Learn 100 merge rules
+	// Train BPE merges (more merges = better text representation)
+	numMerges := 500 // Learn 500 merge rules for better vocabulary
 	rules := tok.TrainBPE(text, numMerges)
 	fmt.Printf("Character vocabulary: %d tokens\n", charVocabSize)
 	fmt.Printf("After BPE training: %d tokens (added %d merges)\n", tok.VocabSize, tok.VocabSize-charVocabSize)
@@ -69,14 +64,17 @@ func main() {
 	fmt.Printf("Text encoded to %d tokens (%.1fx compression)\n", len(tokens), float64(len(text))/float64(len(tokens)))
 	fmt.Printf("Sample tokens: %v\n\n", tokens[:min(20, len(tokens))])
 
-	// Hyperparameters
+	// Hyperparameters - increased for industry-standard training
+	// Industry-standard model sizes for small LMs:
+	// - GPT-2 small: embed=768, heads=12, layers=12, ffn=3072
+	// - We use a smaller but still capable config for faster training
 	config := transformer.GPTConfig{
 		VocabSize:     tok.VocabSize,
-		EmbedDim:      32,
-		NumHeads:      4,
-		NumLayers:     2,
-		ContextWindow: 16,
-		FFHiddenDim:   128,
+		EmbedDim:      128, // Increased for better representation
+		NumHeads:      4,   // 128/4 = 32 per head
+		NumLayers:     4,   // Deeper model
+		ContextWindow: 64,  // Longer context
+		FFHiddenDim:   512, // 4x embed_dim ratio
 	}
 
 	fmt.Println("Model Configuration:")
@@ -134,9 +132,10 @@ func trainSimpleModel(tok *tokenizer.BPETokenizer, tokens []int, config transfor
 	outBias := autograd.NewVariable(1, vocabSize, nil)
 
 	params := []*autograd.Value{embedWeight, outWeight, outBias}
-	lr := 0.3
-	numEpochs := 200
-	printEvery := 20
+	baseLR := 0.05    // Lower base LR for stability
+	numEpochs := 1000 // More epochs for industry-standard loss
+	printEvery := 100
+	warmupEpochs := 100 // Longer warmup period
 
 	startTime := time.Now()
 
@@ -144,8 +143,8 @@ func trainSimpleModel(tok *tokenizer.BPETokenizer, tokens []int, config transfor
 		totalLoss := 0.0
 		numSamples := 0
 
-		// Random sampling instead of iterating all
-		numBatches := min(50, len(tokens)-contextLen-1)
+		// Random sampling - more batches for better gradient estimates
+		numBatches := min(200, len(tokens)-contextLen-1)
 
 		for batch := 0; batch < numBatches; batch++ {
 			i := rand.Intn(len(tokens) - contextLen - 1)
@@ -205,12 +204,31 @@ func trainSimpleModel(tok *tokenizer.BPETokenizer, tokens []int, config transfor
 				}
 			}
 
-			// Update parameters
+			// Compute learning rate with warmup and cosine decay
+			var lr float64
+			if epoch < warmupEpochs {
+				// Linear warmup
+				lr = baseLR * float64(epoch+1) / float64(warmupEpochs)
+			} else {
+				// Cosine decay
+				progress := float64(epoch-warmupEpochs) / float64(numEpochs-warmupEpochs)
+				lr = baseLR * 0.5 * (1.0 + math.Cos(math.Pi*progress))
+			}
+
+			// Update parameters with gradient clipping
+			maxGrad := 1.0 // Gradient clipping threshold
 			for _, p := range params {
 				r, c := p.Shape()
 				for i := 0; i < r; i++ {
 					for j := 0; j < c; j++ {
-						newVal := p.Data.At(i, j) - lr*p.Grad.At(i, j)/float64(contextLen)
+						grad := p.Grad.At(i, j) / float64(contextLen)
+						// Clip gradient
+						if grad > maxGrad {
+							grad = maxGrad
+						} else if grad < -maxGrad {
+							grad = -maxGrad
+						}
+						newVal := p.Data.At(i, j) - lr*grad
 						p.Data.Set(i, j, newVal)
 					}
 				}
@@ -224,7 +242,15 @@ func trainSimpleModel(tok *tokenizer.BPETokenizer, tokens []int, config transfor
 
 		if epoch%printEvery == 0 || epoch == numEpochs-1 {
 			elapsed := time.Since(startTime)
-			fmt.Printf("Epoch %3d | Loss: %.4f | Time: %v\n", epoch, avgLoss, elapsed.Round(time.Millisecond))
+			// Compute current LR for display
+			var currentLR float64
+			if epoch < warmupEpochs {
+				currentLR = baseLR * float64(epoch+1) / float64(warmupEpochs)
+			} else {
+				progress := float64(epoch-warmupEpochs) / float64(numEpochs-warmupEpochs)
+				currentLR = baseLR * 0.5 * (1.0 + math.Cos(math.Pi*progress))
+			}
+			fmt.Printf("Epoch %3d | Loss: %.4f | LR: %.6f | Time: %v\n", epoch, avgLoss, currentLR, elapsed.Round(time.Millisecond))
 		}
 	}
 
@@ -296,17 +322,29 @@ func trainFullGPT(tok *tokenizer.BPETokenizer, tokens []int, config transformer.
 	fmt.Printf("Model has %d parameters\n", model.NumParameters())
 
 	params := model.Parameters()
-	lr := 0.0005
-	numEpochs := 100
-	printEvery := 10
+	baseLR := 0.0005 // Lower LR for larger model stability
+	numEpochs := 500 // More epochs for industry-standard loss (target < 2.0)
+	printEvery := 50
+	warmupEpochs := 50 // Longer warmup for stability
 	contextLen := config.ContextWindow
-	numBatches := min(30, len(tokens)-contextLen-1)
+	numBatches := min(200, len(tokens)-contextLen-1) // More batches per epoch
 
 	startTime := time.Now()
 
 	for epoch := 0; epoch < numEpochs; epoch++ {
 		totalLoss := 0.0
 		numSamples := 0
+
+		// Compute learning rate with warmup and cosine decay
+		var lr float64
+		if epoch < warmupEpochs {
+			// Linear warmup
+			lr = baseLR * float64(epoch+1) / float64(warmupEpochs)
+		} else {
+			// Cosine decay
+			progress := float64(epoch-warmupEpochs) / float64(numEpochs-warmupEpochs)
+			lr = baseLR * 0.5 * (1.0 + math.Cos(math.Pi*progress))
+		}
 
 		for batch := 0; batch < numBatches; batch++ {
 			i := rand.Intn(len(tokens) - contextLen - 1)
@@ -366,7 +404,7 @@ func trainFullGPT(tok *tokenizer.BPETokenizer, tokens []int, config transformer.
 
 		if epoch%printEvery == 0 || epoch == numEpochs-1 {
 			elapsed := time.Since(startTime)
-			fmt.Printf("Epoch %3d | Loss: %.4f | Time: %v\n", epoch, avgLoss, elapsed.Round(time.Millisecond))
+			fmt.Printf("Epoch %3d | Loss: %.4f | LR: %.6f | Time: %v\n", epoch, avgLoss, lr, elapsed.Round(time.Millisecond))
 		}
 	}
 
