@@ -1,154 +1,95 @@
 # GoGPT
 
-A from-scratch implementation of automatic differentiation and GPT-style transformer decoder in pure Go.
+A from-scratch implementation of automatic differentiation and GPT-style transformer decoder in pure Go. No Python, no PyTorch—just Go and matrix math.
 
 ## Features
 
-- **Autograd Engine**: Reverse-mode automatic differentiation with support for:
-  - Basic operations: Add, Sub, Mul, MatMul, Transpose
-  - Activations: ReLU, Softmax, LogSoftmax, GELU, Tanh, Sigmoid
-  - Math functions: Exp, Log, Pow, Sqrt, Sum, Mean
+- **Autograd Engine** — Reverse-mode automatic differentiation supporting Add, Sub, Mul, MatMul, ReLU, Softmax, GELU, Tanh, Sigmoid, and more
+- **Neural Network Layers** — Linear, Embedding, LayerNorm with Xavier initialization
+- **Optimizers** — SGD, Adam, AdamW (recommended for transformers)
+- **Loss Functions** — CrossEntropyLoss, CrossEntropyLossWithSmoothing, MSELoss, NLLLoss
+- **Transformer Components** — Multi-head self-attention with causal masking, FFN, residual connections, full GPT model with text generation
+- **BPE Tokenizer** — Byte Pair Encoding tokenizer for subword tokenization
+- **Backend Abstraction** — GoNum (CPU) and MLX (Apple Silicon GPU)
 
-- **Neural Network Layers**:
-  - Linear (fully connected) with Xavier initialization
-  - Embedding (token lookup)
-  - LayerNorm
+---
 
-- **Optimizers**:
-  - SGD / SGD with Momentum
-  - Adam
-  - **AdamW** (recommended for transformers)
-
-- **Loss Functions**:
-  - CrossEntropyLoss
-  - CrossEntropyLossWithSmoothing (label smoothing)
-  - MSELoss
-  - NLLLoss
-
-- **Transformer Components**:
-  - Multi-head self-attention with causal masking
-  - Position-wise feed-forward network
-  - Decoder blocks with residual connections
-  - Full GPT model with text generation
-
-- **Backend Abstraction** (CPU/GPU):
-  - GoNum backend (CPU, default)
-  - MLX backend (Apple Silicon GPU)
-
-## Project Structure
-
-```
-gogpt/
-├── cmd/
-│   └── train/
-│       └── main.go           # Training script
-├── pkg/
-│   ├── autograd/             # Autodiff engine
-│   ├── backend/              # CPU/GPU backend abstraction
-│   ├── nn/                   # Neural network layers
-│   └── transformer/          # Transformer components
-├── internal/
-│   └── tokenizer/            # BPE tokenizer
-└── docs/
-    └── devlog.md             # Development log
-```
-
-## Quick Start
-
-```bash
-# Run tests
-go test -v ./...
-
-# Train the model (CPU)
-go run ./cmd/train/main.go
-```
-
-## Dev Environment
-
-- Go 1.21+
-- CGO enabled (needed for MLX): `export CGO_ENABLED=1`
-- macOS only: Xcode Command Line Tools (`xcode-select --install`)
-- Git LFS (for `lib/mlx.metallib`): `git lfs install && git lfs pull --include lib/mlx.metallib`
-
-## GPU Acceleration (Apple Silicon)
-
-GoGPT supports GPU acceleration on Apple Silicon Macs using Apple's MLX framework.
-MLX is pulled via Go modules; no local clone or CMake build is required.
+## Development Environment Setup
 
 ### Prerequisites
 
-1. **macOS on Apple Silicon** (M1/M2/M3/M4)
-2. **Xcode Command Line Tools**: `xcode-select --install`
-3. **CGO enabled**: `export CGO_ENABLED=1`
+| Requirement | Notes |
+|-------------|-------|
+| **Go 1.21+** | Required |
+| **CGO** | Enable with `export CGO_ENABLED=1` |
+| **macOS** | Xcode Command Line Tools: `xcode-select --install` |
+| **Git LFS** | For `lib/mlx.metallib`: `git lfs install && git lfs pull --include lib/mlx.metallib` |
 
-### Setup (Recommended)
+### Build & Run
 
 ```bash
+# Clone the repository
+git clone https://github.com/suensky/gogpt.git
+cd gogpt
+
+# Run tests
+go test -v ./...
+
+# Train on CPU (simple)
+go run ./cmd/train/main.go
+```
+
+### GPU Acceleration (Apple Silicon)
+
+GoGPT supports GPU acceleration on Apple Silicon (M1/M2/M3/M4) via Apple's MLX framework.
+
+```bash
+# 1. Setup MLX (downloads prebuilt libmlx.a)
 ./scripts/setup_mlx.sh
-```
 
-This downloads the prebuilt `libmlx.a` into `./lib` and (if present) copies
-`mlx.metallib` into `./lib` for runtime loading.
-If `lib/mlx.metallib` is a Git LFS pointer, run:
-
-```bash
+# 2. Pull the Metal library if using Git LFS
 git lfs pull --include lib/mlx.metallib
-```
 
-If you already have a local MLX build, you can point the setup script at it:
-
-```bash
-MLX_METALLIB_SRC=/path/to/mlx.metallib ./scripts/setup_mlx.sh
-```
-
-Optional, if you want to force the backend:
-
-```bash
-export MLX_BACKEND=metal  # or auto (default), cpu
-```
-
-### Verify MLX Works
-
-```bash
-# Defaults to Metal on macOS ARM64
-make mlx-check
-
-# If you downloaded libmlx.a elsewhere
-MLX_LIB_DIR=/path/to/lib make mlx-check
-```
-
-### Building with GPU Support
-
-```bash
-# Build the train binary with MLX support
+# 3. Build with MLX support
 make build-train
 
-# Run training with the built binary
+# 4. Run training
 make run-train
-
-# If you downloaded libmlx.a elsewhere
-MLX_LIB_DIR=/path/to/lib make build-train
 ```
 
-### Verifying GPU Usage
-
-When running, the output will show which backend is being used:
+**Verify GPU is active:**
 
 ```
-=== GoGPT: Training a Small Transformer ===
 Compute Backend: mlx-gpu (GPU: true)    # GPU acceleration active!
 ```
 
-Without MLX built (or without `-tags=mlx`), it falls back to CPU:
+If you see `gonum-cpu (GPU: false)`, rebuild with `-tags=mlx` and confirm `MLX_BACKEND=metal` is set.
+
+### Project Structure
 
 ```
-Compute Backend: gonum-cpu (GPU: false)  # CPU mode
+gogpt/
+├── cmd/train/          # Training script
+├── pkg/
+│   ├── autograd/       # Autodiff engine
+│   ├── backend/        # CPU/GPU backend abstraction
+│   ├── nn/             # Neural network layers
+│   └── transformer/    # Transformer components (attention, GPT)
+├── internal/tokenizer/ # BPE tokenizer
+├── data/               # Training data (jules_verne.txt)
+├── lib/                # MLX libraries (libmlx.a, mlx.metallib)
+└── scripts/            # Setup scripts
 ```
 
-Troubleshooting:
-- If you see `ld: library 'mlx' not found`, ensure `lib/libmlx.a` exists (run `./scripts/setup_mlx.sh`) or set `MLX_LIB_DIR` to the directory containing `libmlx.a`.
-- If you see `SIGSEGV` right after "Using backend: Metal", ensure `lib/mlx.metallib` is a real binary (not a Git LFS pointer) and re-run `make mlx-check`.
-- If it still shows `gonum-cpu`, rebuild with `-tags=mlx` and confirm `MLX_BACKEND=metal` (or `auto`) is set.
+### Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make build-train` | Build training binary with MLX support |
+| `make run-train` | Run the training binary |
+| `make mlx-check` | Verify MLX backend is working |
+
+---
 
 ## Example Output
 
@@ -170,10 +111,22 @@ Epoch 100 | Loss: 4.5123 | LR: 0.001000
 Epoch 500 | Loss: 2.8456 | LR: 0.000750
 ```
 
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `ld: library 'mlx' not found` | Run `./scripts/setup_mlx.sh` or set `MLX_LIB_DIR` |
+| `SIGSEGV` after "Using backend: Metal" | Ensure `lib/mlx.metallib` is real binary (not LFS pointer) |
+| Still shows `gonum-cpu` | Rebuild with `-tags=mlx`, set `MLX_BACKEND=metal` |
+
+---
+
 ## Dependencies
 
-- [gonum](https://gonum.org/) - Numerical library for matrix operations (CPU backend)
-- [luxfi/mlx](https://github.com/luxfi/mlx) - Go bindings for Apple's MLX (optional, GPU backend)
+- [gonum](https://gonum.org/) — Numerical library for matrix operations (CPU backend)
+- [luxfi/mlx](https://github.com/luxfi/mlx) — Go bindings for Apple's MLX (optional GPU backend)
 
 ## References
 
