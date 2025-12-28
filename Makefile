@@ -22,13 +22,13 @@ check-metallib:
 mlx-check: check-metallib
 	mkdir -p $(dir $(MLX_CHECK_BIN))
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(MLX_LIB_DIR)" go build -o $(MLX_CHECK_BIN) ./cmd/mlx_smoke
-	if [ -f "$(MLX_METALLIB)" ]; then cp "$(MLX_METALLIB)" "$(dir $(MLX_CHECK_BIN))"; fi
+	@if [ -f "$(MLX_METALLIB)" ]; then cp "$(MLX_METALLIB)" "$(dir $(MLX_CHECK_BIN))"; fi
 	MLX_BACKEND=$(MLX_BACKEND) ./$(MLX_CHECK_BIN)
 
 build-train:
 	mkdir -p $(dir $(TRAIN_BIN))
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(MLX_LIB_DIR)" go build -tags=$(TRAIN_TAGS) -o $(TRAIN_BIN) ./cmd/train
-	if [ -f "$(MLX_METALLIB)" ]; then cp "$(MLX_METALLIB)" "$(dir $(TRAIN_BIN))"; fi
+	@if [ -f "$(MLX_METALLIB)" ]; then cp "$(MLX_METALLIB)" "$(dir $(TRAIN_BIN))"; fi
 
 run-train: check-metallib
 	MLX_BACKEND=$(MLX_BACKEND) ./$(TRAIN_BIN)
