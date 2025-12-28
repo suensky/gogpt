@@ -8,7 +8,7 @@ TRAIN_BIN ?= train
 MLX_CHECK_BIN ?= bin/mlx_smoke
 
 check-metallib:
-	if [ "$(MLX_BACKEND)" = "metal" ]; then \
+	@if [ "$(MLX_BACKEND)" = "metal" ]; then \
 		if [ ! -f "$(MLX_METALLIB)" ]; then \
 			echo "ERROR: $(MLX_METALLIB) not found. Run: git lfs pull --include $(MLX_METALLIB)"; \
 			exit 1; \
