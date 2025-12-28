@@ -1,11 +1,12 @@
-// GoGPT Training Script with Full Backpropagation
-// This trains a small GPT-style transformer on a tiny character-level dataset.
+// GoGPT Training Script with BPE Tokenizer
+// This trains a small GPT-style transformer on Jules Verne's "The Mysterious Island"
 package main
 
 import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/suensky/gogpt/internal/tokenizer"
@@ -19,30 +20,63 @@ func main() {
 	rand.Seed(42)
 
 	fmt.Println("=== GoGPT: Training a Small Transformer ===")
+	fmt.Println("=== Using BPE Tokenizer with Jules Verne ===")
 	fmt.Println()
 
-	// Training data
-	text := "hello world hello go hello transformer"
-	fmt.Printf("Training text: %q\n", text)
+	// Load training data
+	dataPath := "data/jules_verne.txt"
+	textBytes, err := os.ReadFile(dataPath)
+	if err != nil {
+		fmt.Printf("Could not load %s: %v\n", dataPath, err)
+		fmt.Println("Falling back to simple demo text...")
+		textBytes = []byte("hello world hello go hello transformer hello world hello go hello transformer")
+	}
+	text := string(textBytes)
 
-	// Create tokenizer
+	// Limit text size for faster training
+	maxChars := 20000
+	if len(text) > maxChars {
+		text = text[:maxChars]
+	}
+
+	fmt.Printf("Training text: %d characters\n", len(text))
+	fmt.Printf("First 200 chars: %s...\n\n", text[:min(200, len(text))])
+
+	// Create BPE tokenizer
+	fmt.Println("Building BPE tokenizer...")
 	tok := tokenizer.NewCharTokenizer(text)
-	fmt.Printf("Vocabulary size: %d\n", tok.VocabSize)
-	fmt.Printf("Characters: %v\n", string(tok.GetVocab()))
+	charVocabSize := tok.VocabSize
+
+	// Train BPE merges
+	numMerges := 100 // Learn 100 merge rules
+	rules := tok.TrainBPE(text, numMerges)
+	fmt.Printf("Character vocabulary: %d tokens\n", charVocabSize)
+	fmt.Printf("After BPE training: %d tokens (added %d merges)\n", tok.VocabSize, tok.VocabSize-charVocabSize)
+
+	// Show some learned merge rules
+	rulesLines := splitLines(rules)
+	if len(rulesLines) > 5 {
+		fmt.Println("Sample merge rules:")
+		for i := 0; i < 5; i++ {
+			fmt.Printf("  %s\n", rulesLines[i])
+		}
+		fmt.Println("  ...")
+	}
+	fmt.Println()
 
 	// Encode the text
 	tokens := tok.Encode(text)
-	fmt.Printf("Encoded tokens: %v\n", tokens)
-	fmt.Println()
+	fmt.Printf("Text encoded to %d tokens (%.1fx compression)\n", len(tokens), float64(len(text))/float64(len(tokens)))
+	fmt.Printf("Sample tokens: %v\n\n", tokens[:min(20, len(tokens))])
 
 	// Hyperparameters
 	config := transformer.GPTConfig{
 		VocabSize:     tok.VocabSize,
-		EmbedDim:      16,
-		NumHeads:      2,
+		EmbedDim:      32,
+		NumHeads:      4,
 		NumLayers:     2,
-		ContextWindow: 8,
-		FFHiddenDim:   64,
+		ContextWindow: 16,
+		FFHiddenDim:   128,
 	}
 
 	fmt.Println("Model Configuration:")
@@ -51,36 +85,45 @@ func main() {
 	fmt.Printf("  Num Heads: %d\n", config.NumHeads)
 	fmt.Printf("  Num Layers: %d\n", config.NumLayers)
 	fmt.Printf("  Context Window: %d\n", config.ContextWindow)
+	fmt.Printf("  FF Hidden Dim: %d\n", config.FFHiddenDim)
 	fmt.Println()
 
-	// Train with a simpler approach: direct embedding + linear model first
-	// to verify the training loop works
+	// Train models
 	trainSimpleModel(tok, tokens, config)
 }
 
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i, ch := range s {
+		if ch == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
 // trainSimpleModel trains a simple embedding + linear model
-// This demonstrates proper gradient flow and training
-func trainSimpleModel(tok *tokenizer.CharTokenizer, tokens []int, config transformer.GPTConfig) {
-	fmt.Println("Training simple embedding + linear model...")
+func trainSimpleModel(tok *tokenizer.BPETokenizer, tokens []int, config transformer.GPTConfig) {
+	fmt.Println("=== Training Simple Embedding + Linear Model ===")
 	fmt.Println()
 
 	vocabSize := tok.VocabSize
 	embedDim := config.EmbedDim
 	contextLen := config.ContextWindow
 
-	// Simple model: just embeddings + linear projection
-	// This is like a simple n-gram model
-
-	// Token embeddings
+	// Simple model: embeddings + linear projection
 	embedWeight := autograd.NewVariable(vocabSize, embedDim, nil)
-	// Initialize with small random values
 	for i := 0; i < vocabSize; i++ {
 		for j := 0; j < embedDim; j++ {
 			embedWeight.Data.Set(i, j, (rand.Float64()-0.5)*0.1)
 		}
 	}
 
-	// Output projection: [embedDim, vocabSize]
 	outWeight := autograd.NewVariable(embedDim, vocabSize, nil)
 	for i := 0; i < embedDim; i++ {
 		for j := 0; j < vocabSize; j++ {
@@ -88,14 +131,12 @@ func trainSimpleModel(tok *tokenizer.CharTokenizer, tokens []int, config transfo
 		}
 	}
 
-	// Output bias
 	outBias := autograd.NewVariable(1, vocabSize, nil)
 
 	params := []*autograd.Value{embedWeight, outWeight, outBias}
-	lr := 0.5 // Higher learning rate for this simple model
-
-	numEpochs := 500
-	printEvery := 50
+	lr := 0.3
+	numEpochs := 200
+	printEvery := 20
 
 	startTime := time.Now()
 
@@ -103,8 +144,11 @@ func trainSimpleModel(tok *tokenizer.CharTokenizer, tokens []int, config transfo
 		totalLoss := 0.0
 		numSamples := 0
 
-		// Create training samples
-		for i := 0; i < len(tokens)-contextLen; i++ {
+		// Random sampling instead of iterating all
+		numBatches := min(50, len(tokens)-contextLen-1)
+
+		for batch := 0; batch < numBatches; batch++ {
+			i := rand.Intn(len(tokens) - contextLen - 1)
 			inputTokens := tokens[i : i+contextLen]
 			targetTokens := tokens[i+1 : i+contextLen+1]
 
@@ -113,26 +157,24 @@ func trainSimpleModel(tok *tokenizer.CharTokenizer, tokens []int, config transfo
 				p.ZeroGrad()
 			}
 
-			// Forward pass for each position (simplified: just use last token to predict next)
 			batchLoss := 0.0
 
 			for pos := 0; pos < contextLen; pos++ {
 				inputIdx := inputTokens[pos]
 				targetIdx := targetTokens[pos]
 
-				// Get embedding for input token
+				// Skip if out of vocab range
+				if inputIdx >= vocabSize || targetIdx >= vocabSize {
+					continue
+				}
+
 				embedding := getRow(embedWeight, inputIdx)
-
-				// Project to logits: embedding @ outWeight + outBias
 				logits := matVecMul(outWeight, embedding, outBias)
-
-				// Compute softmax and cross-entropy loss
 				probs := softmaxVec(logits)
 				loss := -math.Log(probs[targetIdx] + 1e-10)
 				batchLoss += loss
 
-				// Compute gradients manually
-				// d(loss)/d(logits) = probs - one_hot(target)
+				// Gradients
 				dLogits := make([]float64, vocabSize)
 				for j := 0; j < vocabSize; j++ {
 					dLogits[j] = probs[j]
@@ -141,19 +183,16 @@ func trainSimpleModel(tok *tokenizer.CharTokenizer, tokens []int, config transfo
 					}
 				}
 
-				// d(loss)/d(outBias) = dLogits
 				for j := 0; j < vocabSize; j++ {
 					outBias.Grad.Set(0, j, outBias.Grad.At(0, j)+dLogits[j])
 				}
 
-				// d(loss)/d(outWeight) = embedding.T @ dLogits
 				for d := 0; d < embedDim; d++ {
 					for j := 0; j < vocabSize; j++ {
 						outWeight.Grad.Set(d, j, outWeight.Grad.At(d, j)+embedding[d]*dLogits[j])
 					}
 				}
 
-				// d(loss)/d(embedding) = outWeight @ dLogits
 				dEmbed := make([]float64, embedDim)
 				for d := 0; d < embedDim; d++ {
 					for j := 0; j < vocabSize; j++ {
@@ -161,13 +200,12 @@ func trainSimpleModel(tok *tokenizer.CharTokenizer, tokens []int, config transfo
 					}
 				}
 
-				// d(loss)/d(embedWeight[inputIdx]) = dEmbed
 				for d := 0; d < embedDim; d++ {
 					embedWeight.Grad.Set(inputIdx, d, embedWeight.Grad.At(inputIdx, d)+dEmbed[d])
 				}
 			}
 
-			// Update parameters with SGD
+			// Update parameters
 			for _, p := range params {
 				r, c := p.Shape()
 				for i := 0; i < r; i++ {
@@ -195,33 +233,74 @@ func trainSimpleModel(tok *tokenizer.CharTokenizer, tokens []int, config transfo
 	fmt.Printf("Total time: %v\n", time.Since(startTime).Round(time.Millisecond))
 	fmt.Println()
 
-	// Test the model
-	fmt.Println("=== Testing Predictions ===")
-	testPredictions(embedWeight, outWeight, outBias, tok)
+	// Test predictions
+	fmt.Println("=== Sample Token Predictions ===")
+	testPredictions(embedWeight, outWeight, outBias, tok, 10)
 
+	// Train full GPT
 	fmt.Println()
-	fmt.Println("=== Full GPT Model Training ===")
 	trainFullGPT(tok, tokens, config)
 }
 
-// trainFullGPT trains the full GPT transformer model
-func trainFullGPT(tok *tokenizer.CharTokenizer, tokens []int, config transformer.GPTConfig) {
-	fmt.Println("Training full GPT model with proper backprop...")
+func testPredictions(embedWeight, outWeight, outBias *autograd.Value, tok *tokenizer.BPETokenizer, n int) {
+	_, cols := outWeight.Shape()
+	vocabSize := cols
+
+	// Test most common tokens
+	vocab := tok.GetVocab()
+	count := 0
+	for i := 0; i < min(20, len(vocab)) && count < n; i++ {
+		token := vocab[i]
+
+		id, ok := tok.TokenID(token)
+		if !ok || id >= vocabSize {
+			continue
+		}
+
+		embedding := getRow(embedWeight, id)
+		logits := matVecMul(outWeight, embedding, outBias)
+		probs := softmaxVec(logits)
+		topIdx := argmax(probs)
+		topProb := probs[topIdx]
+		topToken, _ := tok.TokenString(topIdx)
+
+		// Format for display
+		displayFrom := formatToken(token)
+		displayTo := formatToken(topToken)
+		fmt.Printf("  '%s' -> '%s' (prob: %.2f)\n", displayFrom, displayTo, topProb)
+		count++
+	}
+}
+
+func formatToken(s string) string {
+	if s == " " {
+		return "<space>"
+	}
+	if s == "\n" {
+		return "\\n"
+	}
+	if s == "\t" {
+		return "\\t"
+	}
+	if len(s) > 8 {
+		return s[:8] + "..."
+	}
+	return s
+}
+
+func trainFullGPT(tok *tokenizer.BPETokenizer, tokens []int, config transformer.GPTConfig) {
+	fmt.Println("=== Training Full GPT Model ===")
 	fmt.Println()
 
-	// Create the full model
 	model := transformer.NewGPT(config)
 	fmt.Printf("Model has %d parameters\n", model.NumParameters())
 
-	// Get all parameters
 	params := model.Parameters()
-
-	// Use Adam optimizer with lower learning rate
-	lr := 0.001
-
-	numEpochs := 200
-	printEvery := 20
+	lr := 0.0005
+	numEpochs := 100
+	printEvery := 10
 	contextLen := config.ContextWindow
+	numBatches := min(30, len(tokens)-contextLen-1)
 
 	startTime := time.Now()
 
@@ -229,25 +308,22 @@ func trainFullGPT(tok *tokenizer.CharTokenizer, tokens []int, config transformer
 		totalLoss := 0.0
 		numSamples := 0
 
-		for i := 0; i < len(tokens)-contextLen; i++ {
+		for batch := 0; batch < numBatches; batch++ {
+			i := rand.Intn(len(tokens) - contextLen - 1)
 			inputTokens := tokens[i : i+contextLen]
 			targetTokens := tokens[i+1 : i+contextLen+1]
 
-			// Zero all gradients
 			for _, p := range params {
 				p.ZeroGrad()
 			}
 
-			// Forward pass
 			logits := model.Forward(inputTokens)
 			seqLen, vocabSize := logits.Shape()
 
-			// Compute loss and gradients
 			loss := 0.0
 			dLogits := mat.NewDense(seqLen, vocabSize, nil)
 
 			for pos := 0; pos < seqLen; pos++ {
-				// Softmax
 				maxVal := logits.Data.At(pos, 0)
 				for j := 1; j < vocabSize; j++ {
 					if logits.Data.At(pos, j) > maxVal {
@@ -266,9 +342,10 @@ func trainFullGPT(tok *tokenizer.CharTokenizer, tokens []int, config transformer
 				}
 
 				targetIdx := targetTokens[pos]
-				loss -= math.Log(probs[targetIdx] + 1e-10)
+				if targetIdx < vocabSize {
+					loss -= math.Log(probs[targetIdx] + 1e-10)
+				}
 
-				// Gradient: softmax - one_hot
 				for j := 0; j < vocabSize; j++ {
 					grad := probs[j]
 					if j == targetIdx {
@@ -279,9 +356,6 @@ func trainFullGPT(tok *tokenizer.CharTokenizer, tokens []int, config transformer
 			}
 
 			loss /= float64(seqLen)
-
-			// Simple gradient update for embeddings
-			// (Full backprop through transformer is complex)
 			updateModelEmbeddings(model, inputTokens, config, dLogits, lr)
 
 			totalLoss += loss
@@ -297,51 +371,49 @@ func trainFullGPT(tok *tokenizer.CharTokenizer, tokens []int, config transformer
 	}
 
 	fmt.Println()
-	fmt.Println("Full GPT training complete!")
+	fmt.Println("GPT training complete!")
 	fmt.Println()
 
-	// Generation with full model
-	fmt.Println("=== Text Generation with GPT ===")
-	for _, start := range []string{"h", "w", "g", " "} {
-		startTokens := tok.Encode(start)
+	// Generation
+	fmt.Println("=== Text Generation ===")
+	prompts := []string{"The ", "Captain ", "mysterious ", "island "}
+	for _, prompt := range prompts {
+		startTokens := tok.Encode(prompt)
 		if len(startTokens) == 0 {
 			continue
 		}
-		generated := model.Generate(startTokens, 25, 0.8)
-		fmt.Printf("Start %q -> %q\n", start, tok.Decode(generated))
+		generated := model.Generate(startTokens, 30, 0.8)
+		text := tok.Decode(generated)
+		fmt.Printf("Prompt: '%s'\n", prompt)
+		fmt.Printf("Generated: %s\n\n", text)
 	}
 }
 
-// updateModelEmbeddings updates embeddings based on loss gradient
 func updateModelEmbeddings(model *transformer.GPT, inputTokens []int, config transformer.GPTConfig, dLogits *mat.Dense, lr float64) {
 	seqLen, vocabSize := dLogits.Dims()
 	embedDim := config.EmbedDim
 
-	// Update output head weights based on gradient
-	// dW = hidden.T @ dLogits (simplified: use input embeddings as hidden)
 	for pos := 0; pos < seqLen; pos++ {
 		tokIdx := inputTokens[pos]
+		if tokIdx >= config.VocabSize {
+			continue
+		}
 
-		// Get embedding for this token
 		for d := 0; d < embedDim; d++ {
 			embVal := model.TokenEmbed.Weight.Data.At(tokIdx, d)
-
 			for j := 0; j < vocabSize; j++ {
 				dL := dLogits.At(pos, j)
-				// Update head weight
 				curr := model.Head.Weights.Data.At(j, d)
 				model.Head.Weights.Data.Set(j, d, curr-lr*embVal*dL/float64(seqLen))
 			}
 		}
 
-		// Update head bias
 		for j := 0; j < vocabSize; j++ {
 			dL := dLogits.At(pos, j)
 			curr := model.Head.Bias.Data.At(0, j)
 			model.Head.Bias.Data.Set(0, j, curr-lr*dL/float64(seqLen))
 		}
 
-		// Update token embeddings
 		for d := 0; d < embedDim; d++ {
 			grad := 0.0
 			for j := 0; j < vocabSize; j++ {
@@ -349,35 +421,6 @@ func updateModelEmbeddings(model *transformer.GPT, inputTokens []int, config tra
 			}
 			curr := model.TokenEmbed.Weight.Data.At(tokIdx, d)
 			model.TokenEmbed.Weight.Data.Set(tokIdx, d, curr-lr*grad/float64(seqLen))
-		}
-	}
-}
-
-func testPredictions(embedWeight, outWeight, outBias *autograd.Value, tok *tokenizer.CharTokenizer) {
-	vocabSize := tok.VocabSize
-
-	// Test predictions for each character
-	for idx := 0; idx < vocabSize; idx++ {
-		ch := tok.IdxToChar[idx]
-
-		// Get embedding
-		embedding := getRow(embedWeight, idx)
-
-		// Get logits
-		logits := matVecMul(outWeight, embedding, outBias)
-
-		// Get top prediction
-		probs := softmaxVec(logits)
-		topIdx := argmax(probs)
-		topProb := probs[topIdx]
-		topChar := tok.IdxToChar[topIdx]
-
-		if ch == ' ' {
-			fmt.Printf("  '<space>' -> '%c' (prob: %.2f)\n", topChar, topProb)
-		} else if topChar == ' ' {
-			fmt.Printf("  '%c' -> '<space>' (prob: %.2f)\n", ch, topProb)
-		} else {
-			fmt.Printf("  '%c' -> '%c' (prob: %.2f)\n", ch, topChar, topProb)
 		}
 	}
 }
@@ -394,8 +437,6 @@ func getRow(m *autograd.Value, row int) []float64 {
 }
 
 func matVecMul(w *autograd.Value, v []float64, bias *autograd.Value) []float64 {
-	// w is [embedDim, vocabSize], v is [embedDim]
-	// result = v @ w = [vocabSize]
 	rows, cols := w.Shape()
 	result := make([]float64, cols)
 
@@ -439,4 +480,11 @@ func argmax(values []float64) int {
 		}
 	}
 	return maxIdx
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

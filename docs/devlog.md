@@ -148,9 +148,48 @@ Loss decreased showing learning is happening.
 
 ---
 
+## 2025-12-27: BPE Tokenizer Upgrade
+
+### Completed
+- Replaced simple character tokenizer with BPE (Byte Pair Encoding) tokenizer
+- Implemented merge rule loading from vocab files
+- Implemented BPE training to learn merge rules from data
+- Downloaded 100KB of Jules Verne's "The Mysterious Island" for training
+- Updated training script to use BPE tokenizer with real data
+
+### BPE Features
+| Feature | Description |
+|---------|-------------|
+| Character vocab | Builds vocabulary from all unique characters |
+| Merge rules | Loads predefined merge rules from vocab file |
+| BPE training | Learns new merge rules from text corpus |
+| Compression | 1.8x compression on Jules Verne text |
+| Backward compat | `NewCharTokenizer()` still works |
+
+### Training Results with BPE
+```
+Vocabulary: 55 chars → 155 tokens (100 merges)
+Compression: 20,000 chars → 11,160 tokens (1.8x)
+
+Simple model: Loss 5.0 → 3.3
+Learned predictions:
+  '!' → ' ' (88% confidence)
+  ',' → '\n' (52% confidence)
+  ' the' → '\n' (36% confidence)
+```
+
+### Test Results: 35 tests passing
+- Tokenizer: 7 tests
+- Autograd: 11 tests
+- Neural networks: 8 tests
+- Transformer: 9 tests
+
+---
+
 ## Summary
 
-### Total Test Cases: 28 (all passing)
+### Total Test Cases: 35 (all passing)
+- Tokenizer: 7 tests
 - Autograd: 11 tests
 - Neural networks: 8 tests  
 - Transformer: 9 tests
