@@ -4,7 +4,7 @@ MLX_BACKEND ?= metal
 MLX_LIB_DIR ?= $(CURDIR)/lib
 MLX_METALLIB ?= $(MLX_LIB_DIR)/mlx.metallib
 TRAIN_TAGS ?= mlx
-TRAIN_BIN ?= train
+TRAIN_BIN ?= bin/train
 MLX_CHECK_BIN ?= bin/mlx_smoke
 
 check-metallib:
@@ -26,6 +26,7 @@ mlx-check: check-metallib
 	MLX_BACKEND=$(MLX_BACKEND) ./$(MLX_CHECK_BIN)
 
 build-train:
+	mkdir -p $(dir $(TRAIN_BIN))
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(MLX_LIB_DIR)" go build -tags=$(TRAIN_TAGS) -o $(TRAIN_BIN) ./cmd/train
 	if [ -f "$(MLX_METALLIB)" ]; then cp "$(MLX_METALLIB)" "$(dir $(TRAIN_BIN))"; fi
 
