@@ -11,6 +11,7 @@ import (
 
 	"github.com/suensky/gogpt/internal/tokenizer"
 	"github.com/suensky/gogpt/pkg/autograd"
+	"github.com/suensky/gogpt/pkg/backend"
 	"github.com/suensky/gogpt/pkg/transformer"
 	"gonum.org/v1/gonum/mat"
 )
@@ -21,6 +22,12 @@ func main() {
 
 	fmt.Println("=== GoGPT: Training a Small Transformer ===")
 	fmt.Println("=== Using BPE Tokenizer with Jules Verne ===")
+	fmt.Println()
+
+	// Initialize and display backend
+	be, _ := backend.AutoSelectBackend()
+	backend.SetDefault(be)
+	fmt.Printf("Compute Backend: %s (GPU: %v)\n", be.Name(), be.IsGPU())
 	fmt.Println()
 
 	// Load training data

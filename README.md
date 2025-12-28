@@ -15,12 +15,13 @@ A from-scratch implementation of automatic differentiation and GPT-style transfo
   - LayerNorm
 
 - **Optimizers**:
-  - SGD
+  - SGD / SGD with Momentum
   - Adam
-  - SGD with Momentum
+  - **AdamW** (recommended for transformers)
 
 - **Loss Functions**:
   - CrossEntropyLoss
+  - CrossEntropyLossWithSmoothing (label smoothing)
   - MSELoss
   - NLLLoss
 
@@ -29,6 +30,10 @@ A from-scratch implementation of automatic differentiation and GPT-style transfo
   - Position-wise feed-forward network
   - Decoder blocks with residual connections
   - Full GPT model with text generation
+
+- **Backend Abstraction** (CPU/GPU):
+  - GoNum backend (CPU, default)
+  - MLX backend (Apple Silicon GPU)
 
 ## Project Structure
 
@@ -39,10 +44,11 @@ gogpt/
 │       └── main.go           # Training script
 ├── pkg/
 │   ├── autograd/             # Autodiff engine
+│   ├── backend/              # CPU/GPU backend abstraction
 │   ├── nn/                   # Neural network layers
 │   └── transformer/          # Transformer components
 ├── internal/
-│   └── tokenizer/            # Character-level tokenizer
+│   └── tokenizer/            # BPE tokenizer
 └── docs/
     └── devlog.md             # Development log
 ```
@@ -53,46 +59,128 @@ gogpt/
 # Run tests
 go test -v ./...
 
-# Train the model
+# Train the model (CPU)
 go run ./cmd/train/main.go
 ```
+
+## Dev Environment
+
+- Go 1.21+
+- CGO enabled (needed for MLX): `export CGO_ENABLED=1`
+- macOS only: Xcode Command Line Tools (`xcode-select --install`)
+- Git LFS (for `lib/mlx.metallib`): `git lfs install && git lfs pull --include lib/mlx.metallib`
+
+## GPU Acceleration (Apple Silicon)
+
+GoGPT supports GPU acceleration on Apple Silicon Macs using Apple's MLX framework.
+MLX is pulled via Go modules; no local clone or CMake build is required.
+
+### Prerequisites
+
+1. **macOS on Apple Silicon** (M1/M2/M3/M4)
+2. **Xcode Command Line Tools**: `xcode-select --install`
+3. **CGO enabled**: `export CGO_ENABLED=1`
+
+### Setup (Recommended)
+
+```bash
+./scripts/setup_mlx.sh
+```
+
+This downloads the prebuilt `libmlx.a` into `./lib` and (if present) copies
+`mlx.metallib` into `./lib` for runtime loading.
+If `lib/mlx.metallib` is a Git LFS pointer, run:
+
+```bash
+git lfs pull --include lib/mlx.metallib
+```
+
+If you already have a local MLX build, you can point the setup script at it:
+
+```bash
+MLX_METALLIB_SRC=/path/to/mlx.metallib ./scripts/setup_mlx.sh
+```
+
+Optional, if you want to force the backend:
+
+```bash
+export MLX_BACKEND=metal  # or auto (default), cpu
+```
+
+### Verify MLX Works
+
+```bash
+# Defaults to Metal on macOS ARM64
+make mlx-check
+
+# If you downloaded libmlx.a elsewhere
+MLX_LIB_DIR=/path/to/lib make mlx-check
+```
+
+### Building with GPU Support
+
+```bash
+# Build the train binary with MLX support
+make build-train
+
+# Run training with the built binary
+make run-train
+
+# If you downloaded libmlx.a elsewhere
+MLX_LIB_DIR=/path/to/lib make build-train
+```
+
+### Verifying GPU Usage
+
+When running, the output will show which backend is being used:
+
+```
+=== GoGPT: Training a Small Transformer ===
+Compute Backend: mlx-gpu (GPU: true)    # GPU acceleration active!
+```
+
+Without MLX built (or without `-tags=mlx`), it falls back to CPU:
+
+```
+Compute Backend: gonum-cpu (GPU: false)  # CPU mode
+```
+
+Troubleshooting:
+- If you see `ld: library 'mlx' not found`, ensure `lib/libmlx.a` exists (run `./scripts/setup_mlx.sh`) or set `MLX_LIB_DIR` to the directory containing `libmlx.a`.
+- If you see `SIGSEGV` right after "Using backend: Metal", ensure `lib/mlx.metallib` is a real binary (not a Git LFS pointer) and re-run `make mlx-check`.
+- If it still shows `gonum-cpu`, rebuild with `-tags=mlx` and confirm `MLX_BACKEND=metal` (or `auto`) is set.
 
 ## Example Output
 
 ```
 === GoGPT: Training a Small Transformer ===
+Compute Backend: gonum-cpu (GPU: false)
 
-Training text: "hello world hello go hello transformer"
-Vocabulary size: 15
+Training text: 100000 characters
+Vocabulary: 556 tokens (500 BPE merges)
 
 Model Configuration:
-  Vocab Size: 15
-  Embed Dim: 16
-  Num Heads: 2
-  Num Layers: 2
-  Context Window: 8
+  Embed Dim: 128
+  Num Heads: 4
+  Num Layers: 4
+  Context Window: 64
 
-Model has 7215 parameters
-
-Epoch   0 | Loss: 2.5219
-Epoch 500 | Loss: 0.6147
-
-=== Testing Predictions ===
-  'h' -> 'e' (prob: 1.00)
-  'e' -> 'l' (prob: 0.77)
-  'l' -> 'o' (prob: 0.61)
-  'w' -> 'o' (prob: 1.00)
+Epoch   0 | Loss: 6.3207 | LR: 0.000500
+Epoch 100 | Loss: 4.5123 | LR: 0.001000
+Epoch 500 | Loss: 2.8456 | LR: 0.000750
 ```
 
 ## Dependencies
 
-- [gonum](https://gonum.org/) - Numerical library for matrix operations
+- [gonum](https://gonum.org/) - Numerical library for matrix operations (CPU backend)
+- [luxfi/mlx](https://github.com/luxfi/mlx) - Go bindings for Apple's MLX (optional, GPU backend)
 
 ## References
 
 - [Andrej Karpathy's micrograd](https://github.com/karpathy/micrograd)
 - [The spelled-out intro to neural networks and backpropagation](https://www.youtube.com/watch?v=VMj-3S1tku0)
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
+- [Apple MLX Framework](https://github.com/ml-explore/mlx)
 
 ## License
 
